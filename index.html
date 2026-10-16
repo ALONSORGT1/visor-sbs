@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a1020" />
+  <meta name="description" content="Visor estereoscópico SBS con Three.js, lil-gui y controles de calibración para Google Cardboard." />
+  <title>StereoLab | Visor SBS</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="./css/styles.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+      "lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.20.0/+esm"
+    }
+  }
+  </script>
+  <script type="module" src="./js/main.js"></script>
+</head>
+<body>
+  <div class="app-shell" id="appShell">
+    <header class="topbar container-fluid px-3 px-lg-4">
+      <div class="d-flex align-items-center gap-3">
+        <div class="brand-mark" aria-hidden="true"><img src="./assets/icons/cardboard.svg" alt="" /></div>
+        <div>
+          <div class="brand-name">Stereo<span>Lab</span></div>
+          <div class="brand-caption">Visor estereoscópico SBS · Three.js + lil-gui</div>
+        </div>
+      </div>
+      <div class="topbar-actions d-flex align-items-center gap-2">
+        <span class="pill-ready d-none d-sm-inline-flex"><span class="pulse-dot"></span> Visor local</span>
+        <a class="btn btn-outline-light btn-sm help-link" href="#ayuda">Guía rápida</a>
+      </div>
+    </header>
+
+    <main class="container-fluid px-3 px-lg-4 py-3 py-lg-4">
+      <div class="row gx-3 gy-3 gx-xl-4">
+        <div class="col-12 col-xl-8">
+          <section class="panel panel-viewer" aria-label="Visualizador SBS">
+            <div class="panel-toolbar">
+              <div class="toolbar-heading">
+                <div class="eyebrow">VISUALIZADOR</div>
+                <h1>Calibra tu imagen 3D</h1>
+                <p>Selecciona una imagen SBS y ajusta la vista para tus gafas.</p>
+              </div>
+              <div class="toolbar-actions">
+                <label class="btn btn-accent btn-sm action-btn" for="fileInput"><span aria-hidden="true">↑</span> Cargar SBS</label>
+                <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,image/avif" class="visually-hidden" aria-label="Seleccionar fotografía SBS" />
+                <button id="fullscreenBtn" type="button" class="btn btn-outline-soft btn-sm action-btn">⛶ Pantalla completa</button>
+              </div>
+            </div>
+
+            <div class="display-wrap" id="displayWrap">
+              <div id="viewerStage" class="viewer-stage" role="img" aria-label="Vista izquierda y derecha de la fotografía SBS">
+                <div class="eye-label eye-label-left" aria-hidden="true">L · Izquierdo</div>
+                <div class="eye-label eye-label-right" aria-hidden="true">R · Derecho</div>
+                <div class="center-divider" aria-hidden="true"></div>
+                <div id="emptyState" class="empty-state" hidden>
+                  <div class="empty-icon">◉ ◉</div>
+                  <strong>Tu visor está listo</strong>
+                  <span>Carga una imagen SBS o selecciona una fotografía de demostración.</span>
+                </div>
+              </div>
+              <div class="stage-footer">
+                <span class="stage-indicator"><span class="pulse-dot"></span> <span id="imageStatus">Cargando demostración…</span></span>
+                <span class="dimension-tag" id="imageDimensions">—</span>
+              </div>
+            </div>
+
+            <div class="bottom-actions">
+              <div class="demo-group">
+                <span class="mini-label">PRUEBAS</span>
+                <button type="button" class="btn btn-demo btn-sm" id="demoOneBtn">01 · Montañas</button>
+                <button type="button" class="btn btn-demo btn-sm" id="demoTwoBtn">02 · Profundidad</button>
+              </div>
+              <button type="button" class="btn btn-cardboard" id="cardboardBtn"><img src="./assets/icons/cardboard.svg" alt="" /> Entrar en modo Cardboard <span aria-hidden="true">↗</span></button>
+            </div>
+          </section>
+
+          <section class="instruction-strip" id="ayuda" aria-label="Consejos de uso">
+            <div class="instruction-num">01</div><div><strong>Carga una foto SBS</strong><span>Dos perspectivas, izquierda y derecha, en un mismo archivo.</span></div>
+            <div class="instruction-num">02</div><div><strong>Ajusta con lil-gui</strong><span>Corrige paralaje, escala, encuadre y alineación.</span></div>
+            <div class="instruction-num">03</div><div><strong>Activa Cardboard</strong><span>Gira el teléfono en horizontal y colócalo en tus gafas.</span></div>
+          </section>
+        </div>
+
+        <div class="col-12 col-xl-4">
+          <aside class="panel panel-calibration" aria-label="Panel de calibración">
+            <div class="aside-heading">
+              <div>
+                <div class="eyebrow">PANEL DE CONTROL</div>
+                <h2>Calibración visual</h2>
+              </div>
+              <span class="status-chip">EN VIVO</span>
+            </div>
+            <p class="aside-description">Mueve los controles. Los cambios se aplican instantáneamente a las dos perspectivas.</p>
+            <div id="guiHost" class="gui-host"></div>
+            <div class="aside-buttons">
+              <button id="resetBtn" type="button" class="btn btn-outline-soft w-100">↺ Restablecer calibración</button>
+              <button id="saveBtn" type="button" class="btn btn-outline-soft w-100">↓ Guardar ajustes (JSON)</button>
+            </div>
+            <div class="tip-box"><strong>Consejo de calibración</strong><p>Comienza con un paralaje de 0 px y un tamaño del 100%. Haz ajustes pequeños mientras pruebas las gafas. No fuerces la vista si produce molestias.</p></div>
+          </aside>
+          <div class="small-note mt-3">Compatible con imágenes <strong>SBS completo</strong> y <strong>Half-SBS</strong>. La carga ocurre en tu dispositivo: no enviamos imágenes a ningún servidor. Requiere conexión a Internet para las bibliotecas CDN.</div>
+        </div>
+      </div>
+      <footer class="site-footer"><span>Proyecto académico · Desarrollo de soluciones en ambientes virtuales</span><span>Three.js · lil-gui · Bootstrap 5 · GitHub Pages</span></footer>
+    </main>
+  </div>
+
+  <div id="toast" class="app-toast" role="status" aria-live="polite"></div>
+</body>
+</html>
