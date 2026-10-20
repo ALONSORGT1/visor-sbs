@@ -1,126 +1,257 @@
 # StereoLab — Visor estereoscópico SBS
 
-Proyecto educativo para la materia **Desarrollo de Soluciones en Ambientes Virtuales**. Es una aplicación web estática, responsiva, construida con **HTML, CSS, Bootstrap 5, Three.js (ES Modules) y lil-gui**. Visualiza fotografías estereoscópicas lado a lado (Side by Side, SBS) en gafas para teléfono tipo Google Cardboard.
+Aplicación educativa estática para **Desarrollo de Soluciones en Ambientes
+Virtuales**, construida con HTML, CSS, Bootstrap 5, Three.js y lil-gui. Muestra
+pares estereoscópicos Full-SBS y Half-SBS en dos vistas para un teléfono con
+gafas tipo Google Cardboard. Mantiene las fotografías y su procesamiento en el
+navegador.
 
-## 1. Estructura del proyecto
+El [informe de implementación](./IMPLEMENTACION.md) registra las correcciones,
+las 57 pruebas automatizadas, las 23 comprobaciones del navegador y los límites
+de validación física. La [auditoría original](./AUDITORIA.md) se conserva como
+referencia histórica.
 
-```text
-visor-sbs/
-├── index.html                 # Interfaz principal y dependencias CDN
-├── css/
-│   └── styles.css             # Diseño responsivo y modo inmersivo
-├── js/
-│   ├── main.js                # Inicialización y eventos
-│   ├── scene.js               # WebGLRenderer, cámaras y dos vistas
-│   ├── viewer.js              # Mapeo UV SBS y calibración de planos
-│   ├── controls.js            # Panel lil-gui
-│   ├── fileLoader.js          # Lectura de archivos locales
-│   └── ui.js                  # Pantalla completa, Cardboard y avisos
-├── assets/
-│   ├── images/
-│   │   ├── demo-sbs-1.jpg     # Muestra: montaña y bote
-│   │   └── demo-sbs-2.jpg     # Muestra: galería y cubo
-│   └── icons/
-│       └── cardboard.svg
-└── README.md
-```
+## Ejecución local
 
-## 2. Cómo iniciar la aplicación
+No requiere instalar paquetes npm, un backend ni claves API. Desde la carpeta
+del proyecto:
 
-No hace falta Node.js, npm, framework de servidor ni clave API. Las bibliotecas se descargan de jsDelivr al abrir la página, por lo que **se requiere Internet** al menos para cargar los CDN.
-
-**En VS Code:** abre la carpeta `visor-sbs` y ejecuta `index.html` con la extensión **Live Server** (opción *Open with Live Server*).
-
-**Alternativa con Python:** en una terminal situada en la carpeta `visor-sbs`, ejecuta:
-
-```bash
+```sh
 python -m http.server 5500
 ```
 
-Abre `http://localhost:5500/`. **No abras `index.html` con doble clic y `file://`**: los módulos ES y otras funcionalidades requieren un servidor HTTP/HTTPS.
+Abre `localhost:5500` en el navegador. También puedes usar Live Server en VS Code.
+Los módulos JavaScript necesitan HTTP o HTTPS: abrir `index.html` con doble clic
+no es una forma de ejecución compatible.
 
-## 3. Cómo usar el visor
+Las dependencias se cargan desde jsDelivr, con versiones fijadas en `index.html`.
+Se necesita acceso a Internet para descargarlas. La aplicación no es una PWA
+sin conexión ni incluye una copia local de esas bibliotecas.
 
-1. La app carga **DEMO 01** automáticamente. Comprueba el efecto estereoscópico o abre **DEMO 02**.
-2. Haz clic en **Cargar SBS** y selecciona una fotografía SBS (`.jpg`, `.png`, `.webp`, `.avif`, hasta 30 MB). También puedes arrastrarla al visor en computadora.
-3. La fotografía debe incluir **la vista izquierda en la mitad izquierda y la derecha en la mitad derecha**. Si están invertidas, utiliza la opción **Intercambiar L/R**.
-4. Ajusta parámetros con **lil-gui**. Es preferible comenzar con *Paralaje 0 px, Escala 100%, Alineación 0 px*.
-5. Pulsa **Entrar en modo Cardboard**. En móviles compatibles, el navegador solicitará pantalla completa y orientación horizontal; algunas versiones de iOS Safari no permiten estas funciones para elementos HTML arbitrarios. En ese caso el proyecto usa un modo inmersivo CSS y hay que girar manualmente el teléfono.
-6. Coloca el teléfono horizontal en las gafas. **Para salir**, pulsa `Esc` en computadora; en el teléfono, toca dos veces rápidamente la pantalla o usa el botón/gesto del sistema para salir de pantalla completa. Puedes sacar primero el teléfono de las gafas para acceder a la pantalla.
-7. Si la imagen resulta incómoda, retira el visor y reduce la escala o el paralaje. No fuerces la fusión de fotografías con disparidad excesiva.
-8. **Guardar ajustes (JSON)** descarga un archivo con los valores elegidos y metadatos de la fotografía (sin incluir sus píxeles). Restablecer calibración regresa a los valores iniciales.
+## Uso y calibración por fotografía
 
-### Calibración lil-gui
+1. El inicio carga una **demostración técnica sintética**. Las dos demos incluyen
+   rótulos visibles y perspectivas calculadas desde cámaras distintas, con
+   paralaje y oclusiones. **No son fotografías propias ni sustituyen la fotografía
+   estereoscópica real que exige la práctica.**
+2. Usa **Cargar SBS** o arrastra una imagen JPG, PNG, WebP o AVIF al visor. El
+   navegador debe poder decodificar el formato seleccionado.
+3. Compara las previsualizaciones **Full-SBS** y **Half-SBS** si desconoces el
+   formato. Full conserva la proporción de cada mitad; Half descomprime cada
+   mitad horizontalmente. Las dimensiones por sí solas no prueban la compresión.
+   Un nombre como `half-sbs` sólo aporta una sugerencia que puedes corregir.
+4. Empieza con escala 100 y traslaciones 0. **Ajustar encuadre** permite volver a
+   un encuadre neutral; el panel avanzado lil-gui mantiene paralaje, escala,
+   posición, desnivel y **Intercambiar L/R** disponibles.
+5. Opcionalmente pulsa **Analizar alineación**. El procesamiento local busca
+   coincidencias únicas en miniaturas y sólo ofrece una corrección vertical
+   cuando existe consenso suficiente. Revisa la vista previa y elige **Aplicar**
+   o **Descartar**. **Deshacer** permite recuperar el estado anterior de la
+   propuesta aplicada; también puedes ajustar cualquier control manualmente.
+6. Pulsa **Guardar para esta foto** cuando confirmes la calibración. La siguiente
+   carga de esa misma fotografía recupera los valores guardados. Las fotografías
+   nuevas empiezan con valores neutrales; los cambios sin confirmar no se guardan
+   automáticamente como una calibración definitiva.
+7. **Exportar JSON** descarga los parámetros y metadatos, sin píxeles. Para
+   recuperarlos, carga la fotografía, usa **Importar JSON**, revisa la propuesta
+   y confirma su aplicación. Si deseas recuperarlos automáticamente en visitas
+   posteriores, pulsa también **Guardar para esta foto**.
+8. Elige la calidad y entra en **Cardboard** con el teléfono horizontal. Para
+   salir usa Escape en computadora, dos toques próximos y rápidos en el visor
+   táctil, o el gesto/botón del navegador para salir de pantalla completa.
 
-| Control | Descripción | Valor inicial |
-|---|---|---|
-| Paralaje (px) | Desplaza las vistas en sentidos opuestos para ajustar su alineación/convergencia aparente | 0 |
-| Escala (%) | Cambia el tamaño de ambas imágenes sin distorsionar su proporción | 100 |
-| Mover X (px) | Desplazamiento horizontal común de las dos vistas | 0 |
-| Mover Y (px) | Desplazamiento vertical común de las dos vistas | 0 |
-| Desnivel L/R (px) | Corrige la diferencia vertical relativa entre ojos | 0 |
-| Tipo de SBS | **Completo:** imágenes de ancho no comprimido. **Half-SBS:** cada mitad comprimida horizontalmente | Completo |
-| Intercambiar L/R | Corrige una fotografía cuyo orden de perspectivas está invertido | No |
+### Unidades de los controles
 
-La calibración digital del paralaje **no cambia la distancia interpupilar física** ni repara una fotografía con disparidades o geometría estéreo erróneas. Las lentes Cardboard pueden requerir calibración óptica/distorsión específica no implementada en este visor introductorio.
+Las traslaciones usan **porcentajes del tamaño renderizado de un ojo**, incluida
+la escala. Así conservan su relación con la fotografía al cambiar el tamaño del
+visor, rotar el dispositivo, escalar o entrar en pantalla completa.
 
-## 4. Arquitectura técnica
+| Control | Referencia y efecto |
+|---|---|
+| Paralaje (%) | Porcentaje del ancho de un ojo; reparte el desplazamiento horizontal entre L y R en sentidos opuestos |
+| Escala (%) | Tamaño de ambas perspectivas; 100 ajusta la imagen conservando su proporción |
+| Mover X (%) | Porcentaje del ancho de un ojo; desplaza ambas vistas horizontalmente |
+| Mover Y (%) | Porcentaje del alto de un ojo; desplaza ambas vistas verticalmente |
+| Desnivel L/R (%) | Porcentaje del alto de un ojo; un valor positivo eleva L y baja R, la mitad en cada vista |
+| Tipo de SBS | Full-SBS o Half-SBS; no cambia los píxeles del archivo |
+| Intercambiar L/R | Cambia qué mitad se presenta a cada ojo |
 
-- `Texture` carga el archivo de imagen en GPU.
-- Dos geometrías `PlaneGeometry` recortan las regiones izquierda (`U=0…0.5`) y derecha (`U=0.5…1`) mediante coordenadas UV, sin cortar ni alterar el archivo original.
-- Cada plano se dibuja en una escena independiente, con una cámara `OrthographicCamera` compartida y un único `WebGLRenderer`, mediante `setViewport()` y `setScissor()`.
-- `viewer.js` calcula la escala de ajuste que conserva el aspecto natural de la imagen en la mitad de la pantalla, y aplica los desplazamientos en píxeles CSS.
-- `lil-gui` modifica un objeto compartido de configuración y actualiza las transformaciones inmediatamente.
-- Las fotos locales se procesan **únicamente en el navegador**. No se suben a servidores.
+Paralaje/desnivel y encuadre se combinan para controlar las posiciones relativas
+de ambos ojos. La alineación digital no cambia la separación física de las
+lentes y no calcula la profundidad ideal de una escena.
 
-## 5. Publicar con GitHub Pages
+### Guardado y JSON
 
-1. Crea un repositorio GitHub, por ejemplo `visor-sbs`.
-2. Sube **todo el contenido** de esta carpeta, manteniendo `index.html` en la raíz del repositorio.
-3. En el repositorio entra en **Settings → Pages → Build and deployment**.
-4. Selecciona **Deploy from a branch**, rama `main` y carpeta `/(root)`. Guarda.
-5. Abre la dirección que muestre GitHub Pages, que habitualmente tiene el formato `https://USUARIO.github.io/visor-sbs/`.
-6. Desde el navegador del teléfono, visita esa dirección, carga una imagen SBS y utiliza **Modo Cardboard**.
+La identidad de cada archivo se calcula sobre su contenido: SHA-256 cuando
+Web Crypto está disponible, con una huella alternativa de contenido y tamaño
+para navegadores que no lo ofrecen. Renombrar un archivo no crea una fotografía
+nueva; volver a codificarlo sí puede cambiar su identidad. La huella alternativa
+no tiene las garantías criptográficas de SHA-256.
 
-Para crear el repositorio con Git local:
+Se conservan hasta 60 calibraciones confirmadas en `localStorage`, separadas de
+la preferencia general de calidad. No se guardan las fotografías. El navegador
+puede borrar estos datos y el almacenamiento es independiente para cada origen
+y navegador. Si está bloqueado o lleno, el visor continúa durante la sesión e
+informa que es necesario exportar JSON para conservar los valores.
 
-```bash
-git init
-git add .
-git commit -m "Visor SBS con Three.js y lil-gui"
-git branch -M main
-git remote add origin https://github.com/USUARIO/visor-sbs.git
-git push -u origin main
+El formato actual es JSON **versión 2**, esquema `stereolab.calibration` y
+unidades `image-percent`. Se validan estructura, tipos, límites, versión y
+metadatos. Un JSON de otra fotografía requiere revisar su vista previa antes de
+aplicarlo. Los archivos del exportador original también pueden importarse, pero
+la conversión desde píxeles CSS es **aproximada**: usa el tamaño renderizado
+actual, porque el formato antiguo no guardaba el tamaño de pantalla. Debe
+revisarse y confirmarse. El tamaño máximo de importación es 64 KB.
+
+## Resolución, memoria y calidad
+
+Se inspecciona la cabecera antes de decodificar una imagen y se limita el origen
+a **30 MiB**, **40 megapíxeles** y 32768 píxeles por dimensión. Un archivo pequeño
+puede necesitar mucha memoria al decodificarse; el peso comprimido no determina
+el consumo real. Los formatos o cabeceras que no se pueden reconocer se rechazan
+con una explicación.
+
+La imagen se prepara localmente sin ampliarla y respetando la proporción de sus
+dos mitades. Si el ancho es impar se omite la columna central para obtener dos
+ojos del mismo ancho. El límite de textura de WebGL también restringe el tamaño
+final.
+
+| Calidad | Presupuesto máximo de textura SBS | Dimensión máxima de textura | Presupuesto máximo del framebuffer |
+|---|---:|---:|---:|
+| Económica | 3 MP | 3072 px | 2 MP |
+| Automática | 8 MP | 4096 px | 8 MP |
+| Nítida | 16 MP | 8192 px | 16 MP |
+
+Son presupuestos máximos, no resoluciones garantizadas ni mediciones de memoria.
+El tamaño disponible, la pantalla y los límites del dispositivo pueden reducir
+el resultado. El framebuffer es el área que dibuja WebGL; su presupuesto es
+independiente del de la fotografía. La calidad automática equilibra detalle y
+consumo; prueba Económica si el teléfono tiene recursos limitados.
+
+Las cargas anteriores se cancelan o invalidan cuando se elige otro archivo.
+Se liberan texturas, geometrías, mapas de bits, URL temporales y recursos que
+dejan de usarse. Las fotografías estáticas se dibujan bajo demanda, al cargar,
+modificar controles o cambiar el tamaño; no necesitan un bucle continuo.
+
+## Cardboard, recuperación y límites
+
+La entrada y salida de pantalla completa se coordinan para manejar solicitudes
+tardías, Escape y pulsaciones repetidas. El modo Cardboard oculta los controles
+normales y las etiquetas del visor. Cuando el navegador lo permite, intenta
+bloquear la orientación horizontal y usar **Screen Wake Lock** para mantener la
+pantalla activa. El bloqueo se libera al salir u ocultar la página y se intenta
+recuperar al volver a ella. Si el navegador deniega estas APIs, la visualización
+continúa con una alternativa CSS y puedes girar el teléfono manualmente.
+
+Ante una pérdida de contexto WebGL se informa del problema y se intenta
+restaurar los recursos y volver a dibujar la imagen sin recargar la página.
+Si el navegador o la GPU no pueden recuperarse, la aplicación no puede garantizar
+una restauración automática.
+
+El análisis vertical trabaja con miniaturas de hasta 256 × 256 píxeles por ojo,
+preferentemente en un worker. Rechaza imágenes planas, pocas coincidencias,
+patrones repetidos y resultados contradictorios. Su indicador de consenso **no
+es una probabilidad de comodidad óptica**. Tampoco determina el orden L/R,
+la profundidad perfecta, rotaciones complejas, distorsión de lentes ni un perfil
+óptico ideal. La estimación puede no ofrecer una sugerencia incluso para una
+pareja válida; los controles manuales siguen disponibles.
+
+No se implementa lectura de QR de perfiles de gafas ni corrección de distorsión
+óptica específica de Cardboard. La comprobación con teléfonos, lentes y usuarios
+reales continúa siendo necesaria; las pruebas de software y las demos sintéticas
+no sustituyen esa verificación física.
+
+## Privacidad y dependencias
+
+Las fotografías se leen y procesan en el dispositivo. El código no las envía a
+servidores ni necesita una cuenta para cargarlas. Las calibraciones locales y
+los JSON sólo contienen parámetros y metadatos, incluido el nombre y la huella
+del archivo. Revisa esos metadatos antes de compartir un JSON.
+
+GitHub Pages sirve la aplicación y las demos. jsDelivr sirve Bootstrap, Three.js
+y lil-gui; esas conexiones permiten a los proveedores recibir los datos normales
+de una solicitud web. Este proyecto no incluye analítica ni un backend de
+fotografías.
+
+## Estructura
+
+```text
+visor-sbs/
+├── index.html                   # Interfaz, favicon e import map con versiones fijadas
+├── css/styles.css               # Interfaz adaptable y modo Cardboard
+├── js/
+│   ├── main.js                  # Carga, propuestas y acciones de la interfaz
+│   ├── settings.js              # Valores, límites y perfiles de calidad
+│   ├── calibration.js           # Validación, persistencia y JSON
+│   ├── layout.js                # Coordenadas proporcionales de ambos ojos
+│   ├── viewer.js                # Textura SBS, geometrías y calibración
+│   ├── scene.js                 # Renderizado bajo demanda y contexto WebGL
+│   ├── controls.js              # Panel avanzado lil-gui
+│   ├── fileLoader.js            # Cabeceras, huellas y preparación de imágenes
+│   ├── assistance.js            # Sugerencias de formato y alineación vertical
+│   ├── alignmentWorker.js       # Coincidencias locales fuera del hilo de interfaz
+│   └── ui.js                    # Fullscreen, orientación, Wake Lock y avisos
+├── assets/
+│   ├── images/                  # Dos demos sintéticas, generador y explicación
+│   └── icons/                   # Cardboard y favicon SVG
+├── tests/                       # Pruebas automatizadas de lógica y regresiones
+├── package.json                 # Módulos ES y script de pruebas; sin dependencias npm
+├── AUDITORIA.md                 # Informe de diagnóstico original
+└── README.md
 ```
 
-Reemplaza `USUARIO` por tu cuenta, y crea primero el repositorio vacío en GitHub. No se incluyen rutas absolutas, así que se puede publicar como *project page* sin reescribir las rutas.
+## Pruebas y mantenimiento
 
-## 6. Evidencias sugeridas
+Para las pruebas de desarrollo se requiere Node.js con soporte de `node:test`,
+sin instalar paquetes:
 
-- Captura de la estructura del repositorio en VS Code (HTML, CSS y módulos JS separados).
-- Captura del visor con una fotografía propia cargada y sus dos perspectivas visibles.
-- Capturas de los controles con valores de calibración antes y después de los ajustes.
-- Foto del móvil en las gafas Cardboard y prueba presencial del efecto de profundidad.
-- Enlace público de GitHub Pages y archivo `calibracion-sbs.json` descargado.
-- Conclusiones técnicas: diferencia entre separación física de lentes, paralaje/desplazamiento digital y formato Half-SBS.
+```sh
+node --test
+```
 
-## 7. Resolución de problemas
+El comando comprueba los casos automatizados presentes en `tests/`. No prueba
+por sí solo la pantalla completa real, la GPU, lentes o todos los navegadores.
+Además se deben comprobar en un navegador la carga inicial, archivos inválidos,
+ambos formatos, L/R, calibración, escala, fotos independientes, JSON, cambios de
+tamaño, calidad y varias entradas/salidas de Cardboard. La consola no debe
+mostrar errores nuevos.
 
-- **Pantalla negra o panel vacío:** comprueba acceso a Internet para Three.js y lil-gui desde jsDelivr; abre la consola del navegador. Puede estar bloqueado un CDN en la red institucional.
-- **No funciona al abrir con doble clic:** usa Live Server o `python -m http.server 5500`.
-- **La imagen sale deformada horizontalmente:** verifica la opción *Tipo de SBS*. Half-SBS requiere descomprimir horizontalmente cada ojo.
-- **Las vistas están cruzadas:** prueba *Intercambiar L/R*; revisa el archivo original si el problema persiste.
-- **Aparece imagen doble:** ajusta primero la escala y luego el paralaje en incrementos pequeños. Si la fotografía tiene un desplazamiento extremo, corrígela en el editor estereoscópico original.
-- **El teléfono se mantiene vertical:** activa orientación horizontal manualmente; `screen.orientation.lock()` y pantalla completa no están admitidos en todos los dispositivos.
-- **Bordes negros:** el visor preserva la relación de aspecto; esto es intencional para evitar estiramientos.
-- **No hay 3D visible:** comprueba que la fotografía contenga dos perspectivas realmente distintas y no dos copias idénticas.
+Las demos pueden regenerarse opcionalmente con Python, NumPy y Pillow:
 
-## 8. Referencias
+```sh
+python assets/images/generate_demos.py
+```
 
-- Three.js — https://threejs.org/docs/
-- Instalación por CDN e import map — https://threejs.org/manual/#en/installation
-- lil-gui — https://lil-gui.georgealways.com/
-- Bootstrap — https://getbootstrap.com/
-- GitHub Pages — https://docs.github.com/en/pages
+Estas bibliotecas sólo son necesarias para regenerar los JPG; el visor usa los
+archivos ya incluidos. Los parámetros de las cámaras y el alcance de los
+recursos sintéticos están documentados en `assets/images/README.md`.
 
-**Licencia educativa:** El código de esta muestra se entrega para ser adaptado y utilizado en clase. Las imágenes de demostración fueron generadas para este proyecto.
+## Publicación y entrega académica
+
+GitHub Pages publica la rama `main`, carpeta raíz. Todos los recursos usan rutas
+relativas para funcionar como página de proyecto. Antes de publicar una nueva
+versión, ejecuta las pruebas, revisa la aplicación con servidor HTTP y confirma
+que los JPG, iconos y módulos forman parte del commit. Después de subirlo,
+comprueba que el despliegue de Pages termine correctamente.
+
+La entrega contiene los dos enlaces y las conclusiones:
+
+1. **Repositorio:** [ALONSORGT1/visor-sbs](https://github.com/ALONSORGT1/visor-sbs).
+2. **Sitio publicado:** [StereoLab en GitHub Pages](https://alonsorgt1.github.io/visor-sbs/).
+
+### Conclusiones técnicas
+
+Las dos perspectivas de una imagen SBS necesitan conservar su proporción y su
+correspondencia entre ojos. Full-SBS y Half-SBS requieren tratamientos
+horizontales distintos; la resolución del archivo no basta para elegirlos con
+certeza.
+
+Expresar las traslaciones como porcentaje de la imagen visible conserva la
+calibración al redimensionar el visor. Guardar valores confirmados por huella de
+contenido evita trasladar por accidente la calibración de una fotografía a otra.
+
+La automatización útil puede reducir la resolución con un presupuesto conocido,
+recuperar parámetros y sugerir un desnivel cuando hay coincidencias coherentes.
+La configuración óptica de las gafas y la comodidad final siguen requiriendo
+verificación física. Las demostraciones sintéticas permiten comprobar el
+software, pero la fotografía propia y las conclusiones individuales de cada
+integrante deben incorporarse como evidencias reales de la práctica.
