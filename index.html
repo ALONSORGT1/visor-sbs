@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#0a1020" />
   <meta name="description" content="Visor estereoscópico SBS con Three.js, lil-gui y controles de calibración para Google Cardboard." />
   <title>StereoLab | Visor SBS</title>
+  <link rel="icon" type="image/svg+xml" sizes="any" href="./assets/icons/favicon.svg" />
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link rel="stylesheet" href="./css/styles.css" />
   <script type="importmap">
@@ -45,7 +46,7 @@
                 <p>Selecciona una imagen SBS y ajusta la vista para tus gafas.</p>
               </div>
               <div class="toolbar-actions">
-                <label class="btn btn-accent btn-sm action-btn" for="fileInput"><span aria-hidden="true">↑</span> Cargar SBS</label>
+                <button id="loadImageBtn" type="button" class="btn btn-accent btn-sm action-btn"><span aria-hidden="true">↑</span> Cargar SBS</button>
                 <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp,image/avif" class="visually-hidden" aria-label="Seleccionar fotografía SBS" />
                 <button id="fullscreenBtn" type="button" class="btn btn-outline-soft btn-sm action-btn">⛶ Pantalla completa</button>
               </div>
@@ -56,10 +57,10 @@
                 <div class="eye-label eye-label-left" aria-hidden="true">L · Izquierdo</div>
                 <div class="eye-label eye-label-right" aria-hidden="true">R · Derecho</div>
                 <div class="center-divider" aria-hidden="true"></div>
-                <div id="emptyState" class="empty-state" hidden>
+                <div id="emptyState" class="empty-state">
                   <div class="empty-icon">◉ ◉</div>
-                  <strong>Tu visor está listo</strong>
-                  <span>Carga una imagen SBS o selecciona una fotografía de demostración.</span>
+                  <strong>Preparando el visor</strong>
+                  <span>Las bibliotecas necesitan conexión a Internet. Después podrás cargar una imagen SBS privada desde tu dispositivo.</span>
                 </div>
               </div>
               <div class="stage-footer">
@@ -68,19 +69,30 @@
               </div>
             </div>
 
+            <div id="feedbackBanner" class="feedback-banner" role="status" aria-live="polite">Preparando la demostración técnica…</div>
+            <details id="formatHelp" class="format-help">
+              <summary>Comparar Full-SBS y Half-SBS</summary>
+              <p id="formatSuggestion">La resolución por sí sola no determina el formato. Compara las proporciones de un ojo.</p>
+              <div class="format-previews">
+                <button type="button" id="fullFormatBtn" class="format-choice" disabled aria-pressed="true"><canvas id="fullPreview" width="240" height="140" aria-hidden="true"></canvas><strong>Usar Full-SBS</strong><span>Sin compresión horizontal</span></button>
+                <button type="button" id="halfFormatBtn" class="format-choice" disabled aria-pressed="false"><canvas id="halfPreview" width="240" height="140" aria-hidden="true"></canvas><strong>Usar Half-SBS</strong><span>Recuperar ancho comprimido</span></button>
+              </div>
+            </details>
+
             <div class="bottom-actions">
               <div class="demo-group">
                 <span class="mini-label">PRUEBAS</span>
-                <button type="button" class="btn btn-demo btn-sm" id="demoOneBtn">01 · Montañas</button>
-                <button type="button" class="btn btn-demo btn-sm" id="demoTwoBtn">02 · Profundidad</button>
+                <button type="button" class="btn btn-demo btn-sm" id="demoOneBtn">01 · Escena sintética</button>
+                <button type="button" class="btn btn-demo btn-sm" id="demoTwoBtn">02 · Galería sintética</button>
               </div>
-              <button type="button" class="btn btn-cardboard" id="cardboardBtn"><img src="./assets/icons/cardboard.svg" alt="" /> Entrar en modo Cardboard <span aria-hidden="true">↗</span></button>
+              <button type="button" class="btn btn-cardboard" id="cardboardBtn" disabled><img src="./assets/icons/cardboard.svg" alt="" /> Entrar en modo Cardboard <span aria-hidden="true">↗</span></button>
             </div>
+            <p class="demo-disclosure">Las dos demos son escenas técnicas sintéticas con perspectivas distintas. Para la práctica debes probar también una fotografía SBS propia real.</p>
           </section>
 
           <section class="instruction-strip" id="ayuda" aria-label="Consejos de uso">
             <div class="instruction-num">01</div><div><strong>Carga una foto SBS</strong><span>Dos perspectivas, izquierda y derecha, en un mismo archivo.</span></div>
-            <div class="instruction-num">02</div><div><strong>Ajusta con lil-gui</strong><span>Corrige paralaje, escala, encuadre y alineación.</span></div>
+            <div class="instruction-num">02</div><div><strong>Compara y calibra</strong><span>Confirma formato, analiza alineación si hace falta y guarda para esta foto.</span></div>
             <div class="instruction-num">03</div><div><strong>Activa Cardboard</strong><span>Gira el teléfono en horizontal y colócalo en tus gafas.</span></div>
           </section>
         </div>
@@ -94,13 +106,32 @@
               </div>
               <span class="status-chip">EN VIVO</span>
             </div>
-            <p class="aside-description">Mueve los controles. Los cambios se aplican instantáneamente a las dos perspectivas.</p>
+            <p class="aside-description">Empieza con el asistente. Los ajustes avanzados siguen disponibles en lil-gui.</p>
+            <div class="simple-controls">
+              <label for="qualitySelect">Calidad de visualización</label>
+              <select id="qualitySelect" class="form-select form-select-sm">
+                <option value="auto">Equilibrada · hasta 8 MP</option><option value="sharp">Alta · hasta 16 MP</option><option value="economy">Ahorro · hasta 3 MP</option>
+              </select>
+              <div class="assist-buttons"><button type="button" id="fitBtn" class="btn btn-outline-soft" disabled>Ajustar encuadre</button><button type="button" id="analyzeBtn" class="btn btn-outline-soft" disabled>Analizar alineación</button></div>
+              <p class="control-note">El análisis es local y opcional. Sugiere sólo desnivel vertical cuando hay coincidencias suficientes; no calcula una profundidad ideal.</p>
+              <div id="proposalPanel" class="proposal-panel" hidden>
+                <strong>Vista previa de ajustes</strong><p id="proposalMessage"></p>
+                <div class="assist-buttons"><button type="button" id="applyProposalBtn" class="btn btn-accent">Aplicar propuesta</button><button type="button" id="discardProposalBtn" class="btn btn-outline-soft">Descartar</button></div>
+              </div>
+              <button type="button" id="undoBtn" class="btn btn-outline-soft w-100" disabled>Deshacer propuesta aplicada</button>
+              <div class="calibration-state" id="calibrationState" role="status">Sin fotografía</div>
+              <button type="button" id="confirmSaveBtn" class="btn btn-accent w-100" disabled>Guardar para esta foto</button>
+            </div>
+            <details class="advanced-controls" open><summary>Calibración avanzada · lil-gui</summary>
             <div id="guiHost" class="gui-host"></div>
+            </details>
             <div class="aside-buttons">
               <button id="resetBtn" type="button" class="btn btn-outline-soft w-100">↺ Restablecer calibración</button>
-              <button id="saveBtn" type="button" class="btn btn-outline-soft w-100">↓ Guardar ajustes (JSON)</button>
+              <button id="exportBtn" type="button" class="btn btn-outline-soft w-100" disabled>↓ Exportar JSON</button>
+              <button id="importBtn" type="button" class="btn btn-outline-soft w-100" disabled>↑ Importar JSON</button>
+              <input id="importInput" type="file" accept="application/json,.json" class="visually-hidden" aria-label="Importar configuración JSON" />
             </div>
-            <div class="tip-box"><strong>Consejo de calibración</strong><p>Comienza con un paralaje de 0 px y un tamaño del 100%. Haz ajustes pequeños mientras pruebas las gafas. No fuerces la vista si produce molestias.</p></div>
+            <div class="tip-box"><strong>Ajustes que conservan su proporción</strong><p>Los desplazamientos se expresan en % del ancho o alto de una vista. Se mantienen al cambiar escala, orientación o pantalla completa. Prueba brevemente las gafas y detente si hay molestias. Para salir: Escape o doble toque en la pantalla.</p></div>
           </aside>
           <div class="small-note mt-3">Compatible con imágenes <strong>SBS completo</strong> y <strong>Half-SBS</strong>. La carga ocurre en tu dispositivo: no enviamos imágenes a ningún servidor. Requiere conexión a Internet para las bibliotecas CDN.</div>
         </div>

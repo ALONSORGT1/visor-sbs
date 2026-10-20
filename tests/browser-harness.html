@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StereoLab · Pruebas de navegador</title>
+  <style>
+    :root{color-scheme:dark;font:15px/1.5 system-ui,sans-serif;background:#0a1020;color:#e8edf9}
+    body{margin:0;padding:24px;max-width:1500px}h1{font-size:1.5rem;margin:0 0 8px}p{max-width:1000px;color:#b8c6dc}
+    button,select{font:inherit;padding:9px 14px;border:1px solid #526487;border-radius:7px;background:#182843;color:inherit}
+    button{cursor:pointer;background:#176d70}button:disabled{opacity:.55;cursor:wait}.toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:20px 0}
+    #summary{font-weight:700}#results{padding-left:25px}#results li{padding:3px 0;overflow-wrap:anywhere}
+    [data-status="pass"]{color:#7ee0af}[data-status="fail"]{color:#ff9696}[data-status="skip"]{color:#f0ce80}
+    .frame-scroll{overflow:auto;max-width:100%;border:1px solid #42516a;border-radius:8px}iframe{display:block;border:0;background:#060d19;height:720px}
+    code{background:#19243a;padding:2px 4px;border-radius:3px}.note{font-size:.88rem}.running{color:#8fd7ef}
+  </style>
+</head>
+<body>
+  <h1>StereoLab · Pruebas de navegador</h1>
+  <p>Ejecuta esta página desde el mismo servidor HTTP del proyecto. La suite carga archivos PNG sintéticos mediante el formulario real y comprueba controles, calibraciones, JSON, tamaños y recuperación WebGL usando el DOM público de la aplicación.</p>
+  <p class="note">Los dos registros de almacenamiento de StereoLab se conservan al comenzar y se restauran al terminar. Utiliza una pestaña de pruebas y evita cambiar otra pestaña del visor durante la ejecución. No se cargan fotografías personales ni se prueban gafas físicas; pantalla completa y Cardboard se comprueban por separado, fuera del iframe.</p>
+  <div class="toolbar">
+    <button id="runTests" type="button">Ejecutar pruebas de navegador</button>
+    <label>Ancho inicial <select id="widthSelect"><option>320</option><option>768</option><option selected>1280</option></select> px</label>
+    <label><input id="largeImageToggle" type="checkbox"> Incluir imagen sintética de 18 MP</label>
+  </div>
+  <p id="summary" role="status" aria-live="polite">Lista para ejecutar.</p>
+  <ol id="results"></ol>
+  <div class="frame-scroll"><iframe id="appFrame" title="StereoLab bajo prueba" src="../index.html" width="1280" height="720"></iframe></div>
+  <script type="module">
+    const frame = document.getElementById('appFrame');
+    const runButton = document.getElementById('runTests');
+    const widths = document.getElementById('widthSelect');
+    const summary = document.getElementById('summary');
+    const results = document.getElementById('results');
+    const storageKeys = ['stereolab.calibrations.v2', 'stereolab.preferences.v1'];
+    const defaults = { parallax:0, scale:100, panX:0, panY:0, vertical:0, format:'full', swap:false };
+    const labels = {
+      parallax:['Paralaje (% ancho)'], scale:['Escala (%)'], panX:['Mover X (% ancho)'],
+      panY:['Mover Y (% alto)'], vertical:['Desnivel (% alto)', 'Desnivel L/R (% alto)'],
+      format:['Tipo de SBS'], swap:['Intercambiar L/R'],
+    };
+    let appDocument, appWindow, counts, errors;
+    class Skip extends Error {}
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    function assert(value, message) { if (!value) throw new Error(message); }
+    function equal(actual, expected, message) {
+      assert(JSON.stringify(actual) === JSON.stringify(expected), `${message}: ${JSON.stringify(actual)} ≠ ${JSON.stringify(expected)}`);
+    }
+    async function waitFor(predicate, message, timeout = 10000) {
+      const end = performance.now() + timeout;
+      let lastError;
+      while (performance.now() < end) {
+        try { if (predicate()) return; } catch (error) { lastError = error; }
+        await pause(35);
+      }
+      throw new Error(`${message}${lastError ? ` (${lastError.message})` : ''}`);
+    }
+    function element(id) {
+      const found = appDocument.getElementById(id);
+      assert(found, `Falta el elemento #${id}`);
+      return found;
+    }
+    function controller(key) {
+      const names = labels[key];
+      const found = [...appDocument.querySelectorAll('#guiHost .controller')].find(node => names.includes(node.querySelector('.name')?.textContent.trim()));
+      assert(found, `No se encontró el control ${names[0]}`);
+      return found;
+    }
+    function numberInput(key) {
+      const input = controller(key).querySelector('input[type="text"],input[type="number"]');
+      assert(input, `El control ${key} no tiene entrada numérica`);
+      return input;
+    }
+    function configFromDOM() {
+      const value = Object.fromEntries(['parallax','scale','panX','panY','vertical'].map(key => [key, Number(numberInput(key).value)]));
+      const select = controller('format').querySelector('select');
+      const description = select?.selectedOptions[0]?.textContent || '';
+      value.format = /half|comprimid/i.test(description) ? 'half' : 'full';
+      value.swap = Boolean(controller('swap').querySelector('input[type="checkbox"]')?.checked);
+      return value;
+    }
+    function setNumber(key, value) {
+      const input = numberInput(key);
+      input.value = String(value);
+      input.dispatchEvent(new appWindow.Event('input', {bubbles:true}));
+      input.dispatchEvent(new appWindow.Event('change', {bubbles:true}));
+    }
+    function click(id) {
+      const target = element(id);
+      assert(!target.disabled, `#${id} está deshabilitado`);
+      target.click();
+    }
+    function selectFile(id, file) {
+      const transfer = new appWindow.DataTransfer();
+      transfer.items.add(file);
+      const input = element(id);
+      input.files = transfer.files;
+      input.dispatchEvent(new appWindow.Event('change', {bubbles:true}));
+    }
+    async function loadImage(file, width, height) {
+      selectFile('fileInput', file);
+      await pause(60);
+      await waitForImage(file, width, height);
+    }
+    async function waitForImage(file, width, height) {
+      await waitFor(() => {
+        const status = element('imageStatus').textContent;
+        const dimensions = element('imageDimensions').textContent;
+        return !element('qualitySelect').disabled && status.includes(file.name) && !/cargando|preparando/i.test(status) &&
+          dimensions.includes(String(width)) && dimensions.includes(String(height));
+      }, `No terminó de cargar ${file.name} (${width} × ${height})`, 20000);
+      await pause(60);
+    }
+    async function exportFromDOM() {
+      const blobs = [];
+      const originalCreate = appWindow.URL.createObjectURL;
+      const prototype = appWindow.HTMLAnchorElement.prototype;
+      const originalClick = prototype.click;
+      appWindow.URL.createObjectURL = function(blob) { blobs.push(blob); return originalCreate.call(this, blob); };
+      prototype.click = function() { if (!this.download) return originalClick.call(this); };
+      try {
+        click('exportBtn');
+        await waitFor(() => blobs.length > 0, 'El botón Exportar no generó un Blob JSON');
+        return JSON.parse(await blobs.at(-1).text());
+      } finally {
+        appWindow.URL.createObjectURL = originalCreate;
+        prototype.click = originalClick;
+      }
+    }
+    async function importJSON(data) {
+      const file = new appWindow.File([typeof data === 'string' ? data : JSON.stringify(data)], 'harness-calibracion.json', {type:'application/json'});
+      selectFile('importInput', file);
+      await pause(60);
+    }
+    // Retrasa sólo las lecturas de archivos de prueba, para reproducir carreras
+    // de importación sin exponer las variables internas de la aplicación.
+    function deferredImports() {
+      const original = appWindow.Blob.prototype.text;
+      const pending = new Map();
+      appWindow.Blob.prototype.text = function() {
+        const item = pending.get(this.name);
+        if (!item) return original.call(this);
+        item.requested = true;
+        return item.promise;
+      };
+      return {
+        queue(data) {
+          let resolve;
+          const promise = new Promise(done => { resolve = done; });
+          const name = `harness-import-pendiente-${Date.now()}-${pending.size}.json`;
+          const text = JSON.stringify(data);
+          const item = { promise, requested:false, finish:() => resolve(text) };
+          pending.set(name, item);
+          const file = new appWindow.File([text], name, {type:'application/json'});
+          selectFile('importInput', file);
+          assert(item.requested, 'No se pudo controlar la lectura diferida del archivo de prueba');
+          return item.finish;
+        },
+        restore() {
+          appWindow.Blob.prototype.text = original;
+          for (const item of pending.values()) item.finish();
+        },
+      };
+    }
+    function feedbackText() { return element('feedbackBanner').textContent; }
+    function emitResult(name, status, detail = '') {
+      const item = document.createElement('li');
+      item.dataset.status = status;
+      item.textContent = `${status === 'pass' ? '✓' : status === 'skip' ? '—' : '✗'} ${name}${detail ? `: ${detail}` : ''}`;
+      results.append(item);
+      counts[status]++;
+      summary.textContent = `En ejecución · ${counts.pass} aprobadas, ${counts.fail} fallidas, ${counts.skip} omitidas`;
+    }
+    async function check(name, fn) {
+      try { const detail = await fn(); emitResult(name, 'pass', detail || ''); }
+      catch (error) { emitResult(name, error instanceof Skip ? 'skip' : 'fail', error.message); }
+    }
+    async function reload() {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('La aplicación no terminó de cargar')), 20000);
+        frame.onload = () => { clearTimeout(timeout); frame.onload = null; resolve(); };
+        frame.src = `../index.html?harness=${Date.now()}`;
+      });
+      appWindow = frame.contentWindow;
+      appDocument = frame.contentDocument;
+      await waitFor(() => appDocument.querySelector('#guiHost .controller'), 'No inició lil-gui; comprueba conexión a los CDN', 15000);
+    }
+    async function syntheticFile(name, seed, width = 320, height = 128, shift = 5) {
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const context = canvas.getContext('2d');
+      const eyeWidth = Math.floor(width / 2);
+      const source = new Uint8Array(eyeWidth * height);
+      let state = seed;
+      for (let i = 0; i < source.length; i++) {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        source[i] = state >>> 24;
+      }
+      const pixels = context.createImageData(width, height);
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+        const right = x >= eyeWidth;
+        const sx = right ? x - eyeWidth + 13 : x;
+        const sy = right ? y + shift : y;
+        const gray = sx >= 0 && sx < eyeWidth && sy >= 0 && sy < height ? source[sy * eyeWidth + sx] : 0;
+        const offset = (y * width + x) * 4;
+        pixels.data[offset] = pixels.data[offset + 1] = pixels.data[offset + 2] = gray;
+        pixels.data[offset + 3] = 255;
+      }
+      context.putImageData(pixels, 0, 0);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      canvas.width = canvas.height = 1;
+      return new appWindow.File([blob], name, {type:'image/png', lastModified:1});
+    }
+    async function largeSyntheticFile() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 6000; canvas.height = 3000;
+      const context = canvas.getContext('2d');
+      const gradient = context.createLinearGradient(0, 0, 3000, 3000);
+      gradient.addColorStop(0, '#123354'); gradient.addColorStop(1, '#62d5af');
+      for (let eye = 0; eye < 2; eye++) {
+        const x = eye * 3000;
+        context.fillStyle = gradient; context.fillRect(x, 0, 3000, 3000);
+        for (let i = 0; i < 20; i++) {
+          context.fillStyle = i % 2 ? '#ffffff' : '#141a37';
+          context.fillRect(x + 150 + (i % 5) * 500 + eye * 8, 200 + Math.floor(i / 5) * 650, 200, 250);
+        }
+      }
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      canvas.width = canvas.height = 1;
+      assert(blob && blob.size < 30 * 1024 * 1024, 'No se pudo preparar el PNG de 18 MP dentro del límite');
+      return new appWindow.File([blob], 'harness-18MP-sintetico.png', {type:'image/png'});
+    }
+    widths.addEventListener('change', () => { frame.width = widths.value; });
+    runButton.addEventListener('click', async () => {
+      runButton.disabled = true;
+      summary.dataset.state = 'running';
+      summary.className = 'running';
+      results.replaceChildren(); counts = {pass:0, fail:0, skip:0}; errors = [];
+      let originals, removeErrorHooks = () => {};
+      try {
+        assert(location.protocol !== 'file:', 'Sirve el proyecto por HTTP; file:// no admite módulos de esta aplicación');
+        originals = new Map(storageKeys.map(key => [key, localStorage.getItem(key)]));
+        frame.width = widths.value;
+        await reload();
+        const captureError = event => errors.push(event.message || String(event.reason));
+        appWindow.addEventListener('error', captureError);
+        appWindow.addEventListener('unhandledrejection', captureError);
+        const originalConsoleError = appWindow.console.error;
+        appWindow.console.error = function(...args) {
+          errors.push(args.map(String).join(' '));
+          originalConsoleError.apply(this, args);
+        };
+        removeErrorHooks = () => {
+          appWindow.removeEventListener('error', captureError);
+          appWindow.removeEventListener('unhandledrejection', captureError);
+          appWindow.console.error = originalConsoleError;
+        };
+        const unique = Date.now();
+        const sameName = `harness-${unique}-mismo-nombre.png`;
+        const imageA = await syntheticFile(sameName, 37);
+        const imageB = await syntheticFile(sameName, 97, 640, 240, -4);
+        let exported;
+        const calibrated = {...defaults, parallax:4.5, scale:120, panX:3, panY:-2, vertical:2};
+        await check('Inicio: canvas WebGL y controles disponibles', async () => {
+          const canvas = appDocument.querySelector('#viewerStage canvas');
+          assert(canvas?.getContext('webgl2'), 'No se creó un contexto WebGL 2');
+          for (const id of ['qualitySelect','confirmSaveBtn','exportBtn','importInput','analyzeBtn','undoBtn','fullFormatBtn','halfFormatBtn','resetBtn','fitBtn']) element(id);
+          assert(Object.values(configFromDOM()).every(value => typeof value === 'boolean' || typeof value === 'string' || Number.isFinite(value)), 'Los controles contienen valores inválidos');
+        });
+        await check('Carga local PNG SBS y calibración horizontal, vertical, escala y encuadre', async () => {
+          await loadImage(imageA, 320, 128);
+          equal(configFromDOM(), defaults, 'Una fotografía nueva debe comenzar con ajustes neutrales');
+          for (const key of ['parallax','scale','panX','panY','vertical']) setNumber(key, calibrated[key]);
+          equal(configFromDOM(), calibrated, 'Los controles no reflejan la calibración');
+        });
+        await check('Confirmación guarda una calibración individual sin píxeles de imagen', async () => {
+          click('confirmSaveBtn');
+          await waitFor(() => {
+            const entries = JSON.parse(localStorage.getItem(storageKeys[0]) || '[]');
+            return entries.some(entry => entry.image.name === sameName && entry.calibration.parallax === 4.5);
+          }, 'La calibración confirmada no apareció en almacenamiento local');
+          exported = await exportFromDOM();
+          equal(exported.calibration, calibrated, 'Exportación diferente de los controles');
+          assert(exported.schema === 'stereolab.calibration' && exported.version === 2 && exported.units === 'image-percent', 'Esquema o unidades JSON incorrectos');
+          assert(!JSON.stringify(exported).includes('data:image'), 'La exportación incluyó píxeles');
+        });
+        await check('Otro archivo con el mismo nombre obtiene valores neutrales', async () => {
+          await loadImage(imageB, 640, 240);
+          equal(configFromDOM(), defaults, 'La imagen nueva heredó calibración de otra');
+        });
+        await check('Recarga del primer archivo recupera su calibración confirmada', async () => {
+          await loadImage(imageA, 320, 128);
+          equal(configFromDOM(), calibrated, 'No se recuperó la calibración individual');
+        });
+        await check('Regresión: lil-gui sincroniza los controles al cambiar entre fotografías', async () => {
+          setNumber('parallax', -3); setNumber('scale', 137); setNumber('vertical', -2);
+          await loadImage(imageB, 640, 240);
+          equal(configFromDOM(), defaults, 'lil-gui mantuvo valores de la fotografía anterior');
+          equal((await exportFromDOM()).calibration, configFromDOM(), 'GUI y calibración real no coinciden para la segunda imagen');
+          await loadImage(imageA, 320, 128);
+          equal(configFromDOM(), calibrated, 'lil-gui no muestra los valores recuperados');
+          equal((await exportFromDOM()).calibration, configFromDOM(), 'GUI y calibración recuperada no coinciden');
+        });
+        await check('Full-SBS, Half-SBS e intercambio L/R', async () => {
+          click('halfFormatBtn');
+          equal(configFromDOM().format, 'half', 'Half-SBS no se activó');
+          equal((await exportFromDOM()).calibration.format, 'half', 'El formato exportado no coincide');
+          click('fullFormatBtn');
+          equal(configFromDOM().format, 'full', 'Full-SBS no se activó');
+          const input = controller('swap').querySelector('input[type="checkbox"]');
+          input.click();
+          equal((await exportFromDOM()).calibration.swap, true, 'L/R no se intercambió');
+          input.click();
+        });
+        await check('Restablecer devuelve todos los valores neutrales', async () => {
+          click('resetBtn'); equal(configFromDOM(), defaults, 'Restablecer dejó ajustes previos');
+        });
+        await check('Importación JSON: vista previa y descarte recuperan los valores anteriores', async () => {
+          assert(exported, 'Falta exportación válida previa');
+          await importJSON(exported);
+          await waitFor(() => !element('proposalPanel').hidden, 'No apareció la vista previa de JSON');
+          equal(configFromDOM(), calibrated, 'La vista previa no muestra el JSON');
+          click('discardProposalBtn');
+          equal(configFromDOM(), defaults, 'Descartar no restauró el estado previo');
+          assert(element('proposalPanel').hidden, 'La propuesta continúa visible tras descartarla');
+        });
+        await check('Importación JSON: aplicar confirma exactamente la propuesta', async () => {
+          await importJSON(exported);
+          await waitFor(() => !element('proposalPanel').hidden, 'No apareció la propuesta');
+          click('applyProposalBtn');
+          assert(element('proposalPanel').hidden, 'Aplicar no cerró la propuesta');
+          equal(configFromDOM(), calibrated, 'La propuesta aplicada cambió los parámetros');
+        });
+        await check('JSON inválido informa el error y conserva la calibración', async () => {
+          const previous = configFromDOM(), feedback = feedbackText();
+          await importJSON('{ JSON roto');
+          await waitFor(() => feedbackText() !== feedback && /json|válid/i.test(feedbackText()), 'No se informó el JSON inválido');
+          equal(configFromDOM(), previous, 'El JSON inválido alteró la calibración');
+        });
+        await check('Archivo de imagen inválido conserva la imagen y los ajustes anteriores', async () => {
+          const previous = configFromDOM(), feedback = feedbackText();
+          selectFile('fileInput', new appWindow.File(['no es una imagen'], 'harness-invalido.txt', {type:'text/plain'}));
+          await waitFor(() => feedbackText() !== feedback && /imagen|formato|seleccion|válid/i.test(feedbackText()), 'No se informó el archivo inválido');
+          equal(configFromDOM(), previous, 'El archivo inválido alteró los ajustes');
+          assert(element('emptyState').hidden, 'La imagen previa desapareció');
+        });
+        await check('Regresión: una carga inválida descarta la vista previa y sincroniza lil-gui', async () => {
+          click('resetBtn');
+          await importJSON(exported);
+          await waitFor(() => !element('proposalPanel').hidden, 'No apareció la propuesta que se debe cancelar');
+          equal(configFromDOM(), calibrated, 'No se activó la vista previa');
+          const previousFeedback = feedbackText();
+          selectFile('fileInput', new appWindow.File(['invalido'], 'harness-error-con-propuesta.txt', {type:'text/plain'}));
+          await waitFor(() => !element('qualitySelect').disabled && feedbackText() !== previousFeedback && element('feedbackBanner').dataset.kind === 'error', 'La carga inválida no terminó');
+          assert(element('proposalPanel').hidden, 'La propuesta continúa abierta después de intentar otra carga');
+          equal(configFromDOM(), defaults, 'lil-gui conservó la propuesta cancelada');
+          equal((await exportFromDOM()).calibration, defaults, 'La calibración real no volvió al estado previo');
+        });
+        await check('Calidad económica limita el framebuffer y conserva ajustes', async () => {
+          const previous = configFromDOM();
+          const select = element('qualitySelect'); select.value = 'economy';
+          select.dispatchEvent(new appWindow.Event('change', {bubbles:true}));
+          await waitFor(() => JSON.parse(localStorage.getItem(storageKeys[1]) || '{}').quality === 'economy', 'No se guardó la preferencia de calidad');
+          await pause(200);
+          const canvas = appDocument.querySelector('#viewerStage canvas');
+          const rect = canvas.getBoundingClientRect();
+          assert(canvas.width <= Math.ceil(rect.width) + 1 && canvas.height <= Math.ceil(rect.height) + 1, 'La calidad económica superó DPR 1');
+          equal(configFromDOM(), previous, 'El cambio de calidad alteró la calibración');
+        });
+        await check('Regresión: calidad permanece deshabilitada durante una carga y rechaza cambios programáticos', async () => {
+          const select = element('qualitySelect');
+          const previousQuality = select.value;
+          const previousPreference = localStorage.getItem(storageKeys[1]);
+          selectFile('fileInput', imageB);
+          assert(select.disabled, 'El selector de calidad sigue habilitado durante la preparación');
+          select.value = previousQuality === 'sharp' ? 'auto' : 'sharp';
+          select.dispatchEvent(new appWindow.Event('change', {bubbles:true}));
+          equal(select.value, previousQuality, 'El cambio programático interrumpió una carga activa');
+          equal(localStorage.getItem(storageKeys[1]), previousPreference, 'Se guardó una calidad durante la carga');
+          await waitForImage(imageB, 640, 240);
+          equal(configFromDOM(), defaults, 'La carga interrumpida dejó ajustes incorrectos');
+          await loadImage(imageA, 320, 128);
+        });
+        await check('Regresión: importaciones fuera de orden conservan la propuesta más reciente', async () => {
+          click('resetBtn');
+          const slow = {...exported, calibration:{...defaults, parallax:-3}};
+          const latest = {...exported, calibration:{...defaults, parallax:6}};
+          const reads = deferredImports();
+          try {
+            const finishSlow = reads.queue(slow);
+            const finishLatest = reads.queue(latest);
+            finishLatest();
+            await waitFor(() => !element('proposalPanel').hidden && configFromDOM().parallax === 6, 'No se mostró la importación más reciente');
+            finishSlow(); await pause(100);
+            equal(configFromDOM().parallax, 6, 'Una importación antigua sustituyó la propuesta nueva');
+            click('discardProposalBtn');
+            equal(configFromDOM(), defaults, 'Descartar la importación nueva dejó un estado incorrecto');
+          } finally { reads.restore(); }
+        });
+        await check('Regresión: cambiar ajustes, restablecer o cargar otra foto invalida un JSON pendiente', async () => {
+          const reads = deferredImports();
+          const candidate = {...exported, calibration:{...defaults, parallax:6}};
+          try {
+            click('resetBtn');
+            const afterManual = reads.queue(candidate);
+            setNumber('parallax', 2); afterManual(); await pause(100);
+            assert(element('proposalPanel').hidden, 'Un JSON pendiente reapareció después de un ajuste manual');
+            equal(configFromDOM().parallax, 2, 'El JSON sobrescribió el ajuste manual');
+            const afterReset = reads.queue(candidate);
+            click('resetBtn'); afterReset(); await pause(100);
+            assert(element('proposalPanel').hidden, 'Un JSON pendiente reapareció después de restablecer');
+            equal(configFromDOM(), defaults, 'El JSON sobrescribió los valores restablecidos');
+            const afterLoad = reads.queue(candidate);
+            await loadImage(imageB, 640, 240);
+            afterLoad(); await pause(100);
+            assert(element('proposalPanel').hidden, 'Se aplicó un JSON de la foto anterior tras cargar otra');
+            equal(configFromDOM(), defaults, 'El JSON pendiente alteró la segunda imagen');
+            await loadImage(imageA, 320, 128);
+          } finally { reads.restore(); }
+        });
+        await check('Redimensionar a 320, 768 y 1280 px conserva la calibración', async () => {
+          const previous = configFromDOM();
+          for (const width of [320,768,1280]) {
+            frame.width = String(width); await pause(200);
+            equal(configFromDOM(), previous, `Cambió la calibración a ${width} px`);
+            const canvas = appDocument.querySelector('#viewerStage canvas');
+            assert(canvas.width > 0 && canvas.height > 0, `Framebuffer vacío a ${width} px`);
+            assert(appDocument.documentElement.scrollWidth <= width + 2, `Desbordamiento horizontal a ${width} px (${appDocument.documentElement.scrollWidth})`);
+          }
+        });
+        await check('Regresión: JSON antiguo usa su propia escala 180% y formato Half-SBS al convertir píxeles', async () => {
+          click('resetBtn');
+          const rect = element('viewerStage').getBoundingClientRect();
+          const width = Math.round(rect.width), height = Math.round(rect.height);
+          const eyeAspect = (320 / 2) / 128 * 2;
+          const fittedHeight = height * Math.min(1, (width / 2 / height) / eyeAspect) * 1.8;
+          const fittedWidth = fittedHeight * eyeAspect;
+          const old = { parallax:fittedWidth * 0.04, scale:180, panX:fittedWidth * 0.03,
+            panY:-fittedHeight * 0.02, vertical:fittedHeight * 0.01, format:'half', swap:false };
+          await importJSON({proyecto:'StereoLab / Three.js', imagen:exported.image, calibracion:old});
+          await waitFor(() => !element('proposalPanel').hidden, 'El JSON antiguo válido no produjo vista previa');
+          const proposed = configFromDOM();
+          const expected = {...defaults, parallax:4, scale:180, panX:3, panY:-2, vertical:1, format:'half'};
+          for (const key of ['parallax','scale','panX','panY','vertical']) assert(Math.abs(proposed[key] - expected[key]) <= 0.051, `Conversión ${key} incorrecta: ${proposed[key]} en vez de ${expected[key]}`);
+          equal(proposed.format, 'half', 'Se perdió el formato Half-SBS antiguo');
+          click('discardProposalBtn');
+          equal(configFromDOM(), defaults, 'Descartar el JSON antiguo no restauró el visor');
+        });
+        await check('Análisis local con desnivel conocido, vista previa, aplicación y deshacer', async () => {
+          click('resetBtn');
+          const before = configFromDOM();
+          click('analyzeBtn');
+          await waitFor(() => !element('proposalPanel').hidden || !element('analyzeBtn').disabled, 'El análisis no terminó', 15000);
+          if (element('proposalPanel').hidden) throw new Skip(`El análisis no propuso una corrección confiable: ${feedbackText()}`);
+          const proposed = configFromDOM();
+          assert(Math.abs(proposed.vertical - 5 / 128 * 100) < 0.15, `Corrección inesperada ${proposed.vertical}%; se esperaba 3.90625%`);
+          click('applyProposalBtn');
+          equal(configFromDOM(), proposed, 'Aplicar alteró la corrección propuesta');
+          click('undoBtn');
+          equal(configFromDOM(), before, 'Deshacer no restauró el estado anterior al análisis');
+        });
+        await check('WebGL: pérdida y restauración reales mantienen imagen y calibración', async () => {
+          const canvas = appDocument.querySelector('#viewerStage canvas');
+          const gl = canvas.getContext('webgl2');
+          const extension = gl?.getExtension('WEBGL_lose_context');
+          if (!extension) throw new Skip('WEBGL_lose_context no está disponible en este navegador');
+          const previous = configFromDOM();
+          let lost = false, restored = false;
+          const onLost = () => { lost = true; };
+          const onRestored = () => { restored = true; };
+          canvas.addEventListener('webglcontextlost', onLost);
+          canvas.addEventListener('webglcontextrestored', onRestored);
+          try {
+            extension.loseContext();
+            await waitFor(() => lost, 'No se recibió webglcontextlost');
+            await waitFor(() => /perdi|recuperaci|contexto/i.test(feedbackText()), 'No se informó la pérdida de WebGL');
+            await pause(250);
+            extension.restoreContext();
+            await waitFor(() => restored, 'No se recibió webglcontextrestored', 12000);
+            await waitFor(() => /webgl recuperad/i.test(feedbackText()), 'No se confirmó el primer redibujado tras recuperar WebGL');
+            equal(configFromDOM(), previous, 'La recuperación alteró ajustes');
+            assert(element('imageStatus').textContent.includes(sameName), 'No se conservó la imagen');
+          } finally {
+            canvas.removeEventListener('webglcontextlost', onLost);
+            canvas.removeEventListener('webglcontextrestored', onRestored);
+            if (gl.isContextLost()) extension.restoreContext();
+          }
+        });
+        await check('Imagen sintética de 18 MP: reducción y metadatos originales', async () => {
+          if (!document.getElementById('largeImageToggle').checked) throw new Skip('Activa la casilla para incluir la prueba de memoria de 18 MP');
+          const select = element('qualitySelect'); select.value = 'auto';
+          select.dispatchEvent(new appWindow.Event('change', {bubbles:true})); await pause(100);
+          const large = await largeSyntheticFile();
+          await loadImage(large, 6000, 3000);
+          const preparationMessage = feedbackText();
+          const data = await exportFromDOM();
+          assert(data.image.width === 6000 && data.image.height === 3000, 'Se perdieron dimensiones originales');
+          assert(/copia de visualizaci[oó]n|reduc|preparad|optim/i.test(preparationMessage), 'La interfaz no informa la reducción de resolución');
+          return `${(large.size / 1024 / 1024).toFixed(2)} MiB de archivo, 18 MP originales`;
+        });
+        await check('Ausencia de errores JavaScript y errores nuevos de consola durante la suite', async () => {
+          assert(errors.length === 0, [...new Set(errors)].join(' | '));
+        });
+      } catch (error) {
+        emitResult('Preparación de la suite', 'fail', error.message);
+      } finally {
+        removeErrorHooks();
+        if (originals) {
+          try {
+            for (const [key, value] of originals) {
+              if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value);
+            }
+            frame.src = '../index.html';
+          } catch (error) { emitResult('Restauración de almacenamiento', 'fail', error.message); }
+        }
+        frame.width = widths.value;
+        summary.dataset.state = 'completed';
+        summary.className = '';
+        summary.textContent = `Finalizado · ${counts.pass} aprobadas, ${counts.fail} fallidas, ${counts.skip} omitidas. Almacenamiento original restaurado. Las pruebas no verifican la comodidad con gafas ni las API físicas de un teléfono.`;
+        runButton.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
